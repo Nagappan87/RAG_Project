@@ -106,50 +106,52 @@ async def transcribe_audio_gemini(api_key: str, file_path: str) -> str:
 async def transcribe_audio_openai(api_key: str, file_path: str) -> str:
     url = "https://api.openai.com/v1/audio/transcriptions"
     headers = {"Authorization": f"Bearer {api_key}"}
-    files = {"file": (os.path.basename(file_path), open(file_path, "rb"), "audio/m4a")}
     data = {
         "model": "whisper-1",
         "response_format": "verbose_json"
     }
-    async with httpx.AsyncClient(timeout=120.0) as client:
-        res = await client.post(url, headers=headers, files=files, data=data)
-        if res.status_code == 200:
-            res_data = res.json()
-            segments = res_data.get("segments", [])
-            formatted = []
-            for seg in segments:
-                start_sec = int(seg["start"])
-                m, s = divmod(start_sec, 60)
-                h, m = divmod(m, 60)
-                timestamp = f"[{h:02d}:{m:02d}:{s:02d}]" if h > 0 else f"[{m:02d}:{s:02d}]"
-                formatted.append(f"{timestamp} {seg['text'].strip()}")
-            return "\n".join(formatted)
-        else:
-            raise Exception(f"OpenAI Whisper API error: {res.status_code} - {res.text}")
+    with open(file_path, "rb") as f:
+        files = {"file": (os.path.basename(file_path), f, "audio/m4a")}
+        async with httpx.AsyncClient(timeout=120.0) as client:
+            res = await client.post(url, headers=headers, files=files, data=data)
+    if res.status_code == 200:
+        res_data = res.json()
+        segments = res_data.get("segments", [])
+        formatted = []
+        for seg in segments:
+            start_sec = int(seg["start"])
+            m, s = divmod(start_sec, 60)
+            h, m = divmod(m, 60)
+            timestamp = f"[{h:02d}:{m:02d}:{s:02d}]" if h > 0 else f"[{m:02d}:{s:02d}]"
+            formatted.append(f"{timestamp} {seg['text'].strip()}")
+        return "\n".join(formatted)
+    else:
+        raise Exception(f"OpenAI Whisper API error: {res.status_code} - {res.text}")
 
 async def transcribe_audio_groq(api_key: str, file_path: str) -> str:
     url = "https://api.groq.com/openai/v1/audio/transcriptions"
     headers = {"Authorization": f"Bearer {api_key}"}
-    files = {"file": (os.path.basename(file_path), open(file_path, "rb"), "audio/m4a")}
     data = {
         "model": "whisper-large-v3",
         "response_format": "verbose_json"
     }
-    async with httpx.AsyncClient(timeout=120.0) as client:
-        res = await client.post(url, headers=headers, files=files, data=data)
-        if res.status_code == 200:
-            res_data = res.json()
-            segments = res_data.get("segments", [])
-            formatted = []
-            for seg in segments:
-                start_sec = int(seg["start"])
-                m, s = divmod(start_sec, 60)
-                h, m = divmod(m, 60)
-                timestamp = f"[{h:02d}:{m:02d}:{s:02d}]" if h > 0 else f"[{m:02d}:{s:02d}]"
-                formatted.append(f"{timestamp} {seg['text'].strip()}")
-            return "\n".join(formatted)
-        else:
-            raise Exception(f"Groq Whisper API error: {res.status_code} - {res.text}")
+    with open(file_path, "rb") as f:
+        files = {"file": (os.path.basename(file_path), f, "audio/m4a")}
+        async with httpx.AsyncClient(timeout=120.0) as client:
+            res = await client.post(url, headers=headers, files=files, data=data)
+    if res.status_code == 200:
+        res_data = res.json()
+        segments = res_data.get("segments", [])
+        formatted = []
+        for seg in segments:
+            start_sec = int(seg["start"])
+            m, s = divmod(start_sec, 60)
+            h, m = divmod(m, 60)
+            timestamp = f"[{h:02d}:{m:02d}:{s:02d}]" if h > 0 else f"[{m:02d}:{s:02d}]"
+            formatted.append(f"{timestamp} {seg['text'].strip()}")
+        return "\n".join(formatted)
+    else:
+        raise Exception(f"Groq Whisper API error: {res.status_code} - {res.text}")
 
 async def fetch_youtube_transcript_stt(video_id: str) -> str:
     temp_dir = Path(UPLOADS_DIR)
@@ -171,21 +173,34 @@ async def fetch_youtube_transcript_stt(video_id: str) -> str:
     try:
         await asyncio.to_thread(_download)
         
+        # Resolve downloaded file (handles cases where yt-dlp appends .webm or other extension)
+        actual_file_path = temp_file_path
         if not temp_file_path.exists():
-            raise Exception("Failed to download video audio stream.")
+            prefix = temp_file_path.name.replace(".m4a", "")
+            matching_files = list(temp_dir.glob(f"{prefix}*"))
+            if matching_files:
+                actual_file_path = matching_files[0]
+            else:
+                raise Exception("Failed to download video audio stream.")
             
         if settings.gemini_api_key:
-            return await transcribe_audio_gemini(settings.gemini_api_key, str(temp_file_path))
+            return await transcribe_audio_gemini(settings.gemini_api_key, str(actual_file_path))
         elif settings.openai_api_key:
-            return await transcribe_audio_openai(settings.openai_api_key, str(temp_file_path))
+            return await transcribe_audio_openai(settings.openai_api_key, str(actual_file_path))
         elif settings.grok_api_key:
-            return await transcribe_audio_groq(settings.grok_api_key, str(temp_file_path))
+            return await transcribe_audio_groq(settings.grok_api_key, str(actual_file_path))
         else:
             raise Exception(
                 "Video has no captions, and no Gemini, OpenAI, or Grok API key is configured to run audio transcription."
             )
     finally:
-        if temp_file_path.exists():
+        # Clean up whatever file was actually created on disk
+        if 'actual_file_path' in locals() and actual_file_path.exists():
+            try:
+                os.remove(actual_file_path)
+            except Exception:
+                pass
+        elif temp_file_path.exists():
             try:
                 os.remove(temp_file_path)
             except Exception:
@@ -285,7 +300,7 @@ def extract_page_data(html_content: str, url: str) -> dict:
     category = "documentation" # Default
     url_lower = url.lower()
     
-    if "faq" in url_lower or "question" in url_lower or len(soup.find_all(text=re.compile(r"\b(FAQ|Frequently Asked Questions)\b", re.IGNORECASE))) > 0:
+    if "faq" in url_lower or "question" in url_lower or len(soup.find_all(string=re.compile(r"\b(FAQ|Frequently Asked Questions)\b", re.IGNORECASE))) > 0:
         category = "faq"
     elif "blog" in url_lower or "news" in url_lower or soup.find("article"):
         category = "blog"
