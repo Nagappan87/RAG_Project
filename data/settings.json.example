@@ -1,0 +1,14 @@
+{
+    "jwt_secret": "your_jwt_secret_here",
+    "jwt_algorithm": "HS256",
+    "openai_api_key": "",
+    "gemini_api_key": "",
+    "grok_api_key": "",
+    "grok_model": "grok-beta",
+    "chunk_size": 600,
+    "chunk_overlap": 50,
+    "top_k": 5,
+    "temperature": 0.3,
+    "max_crawl_depth": 1,
+    "max_pages": 20
+}
