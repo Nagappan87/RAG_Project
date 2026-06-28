@@ -38,6 +38,15 @@ from backend.vector_store import delete_vector_index
 
 app = FastAPI(title="RAG Website Chatbot API", version="1.0.0")
 
+@app.get("/")
+def root():
+    return {
+        "status": "ok",
+        "message": "RAG Chatbot API is running"
+    }
+
+
+
 # CORS Middleware Setup
 app.add_middleware(
     CORSMiddleware,
